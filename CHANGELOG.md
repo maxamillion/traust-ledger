@@ -2,6 +2,14 @@
 
 All notable changes to traust-ledger are documented here.
 
+## [0.8.5]
+
+### Changed
+
+- traust-contracts 0.47.0 (every threat-model section defined). The ledger
+  doesn't read threat models; this keeps one contracts ref across the
+  release train.
+
 ## [0.8.4]
 
 ### Changed
