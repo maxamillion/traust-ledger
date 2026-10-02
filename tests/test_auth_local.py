@@ -109,13 +109,27 @@ class TestLocalRoundTrip:
         assert isinstance(actor, LayerActor)
         assert actor.identity == "alice@corp.com"
         assert actor.kind == "human"
-        assert actor.identity_verified is True
+        # Self-asserted: anyone can mint a local token for any address.
+        assert actor.identity_verified is False
         assert actor.identity_provider == "local"
         assert actor.identity_issuer == "local"
 
+    def test_trusted_local_token_is_verified(
+        self, local_config_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LEDGER_TRUST_LOCAL_IDENTITY", "1")
+        key = ensure_local_keypair(local_config_dir)
+        token = mint_local_token("alice@corp.com", key)
+
+        config = VerifierConfig(jwks_path=local_jwks_path(local_config_dir), issuer=LOCAL_ISSUER)
+        actor = TokenVerifier(config).verify(token)
+
+        assert actor.identity_verified is True
+        assert actor.identity_provider == "local"
+
 
 class TestLocalActorWithGates:
-    """Local actors should pass all domain gates."""
+    """Trusted local actors (LEDGER_TRUST_LOCAL_IDENTITY=1) pass all domain gates."""
 
     def _make_local_actor(self) -> LayerActor:
         return LayerActor(
@@ -138,6 +152,14 @@ class TestLocalActorWithGates:
 
         actor = self._make_local_actor()
         require_verified_for_false_positive(actor, "false_positive")
+
+    def test_untrusted_local_actor_cannot_assert_false_positive(self) -> None:
+        from traust_ledger._internal.gates import require_verified_for_false_positive
+        from traust_ledger.errors import IdentityUnverifiedError
+
+        actor = self._make_local_actor().model_copy(update={"identity_verified": False})
+        with pytest.raises(IdentityUnverifiedError):
+            require_verified_for_false_positive(actor, "false_positive")
 
 
 class TestResolveTokenLocalFallback:
@@ -239,8 +261,63 @@ class TestLedgerClientActorGate:
             actor = client._actor()
 
         assert actor.identity == "alice@corp.com"
-        assert actor.identity_verified is True
+        assert actor.identity_verified is False
         assert actor.kind == "human"
+
+    @pytest.mark.parametrize(("trusted", "accepted"), [("", False), ("1", True)])
+    def test_local_false_positive_countersign_needs_trust(
+        self, local_config_dir: Path, trusted: str, accepted: bool
+    ) -> None:
+        """One person can mint many local identities, so by default a local
+        token cannot record the FP verdicts the two-person rule counts."""
+        from conftest import canonical_shell
+
+        from traust_ledger._internal.backends.file import FileBackend
+        from traust_ledger._internal.integrity.signing import SigningConfig
+        from traust_ledger.auth.local import ensure_local_keypair, mint_local_token
+        from traust_ledger.client import LedgerClient, LedgerError
+        from traust_ledger.paths import layer_file_path
+
+        data_dir = local_config_dir / "data"
+        data_dir.mkdir()
+        path = layer_file_path(str(data_dir), "L")
+        FileBackend(data_dir=data_dir).initialize(path, canonical_shell())
+        token = mint_local_token("alice@corp.com", ensure_local_keypair(local_config_dir))
+
+        env = {
+            "LEDGER_OIDC_ISSUER": "",
+            "LEDGER_OIDC_JWKS_URL": "",
+            "LEDGER_OIDC_AUDIENCE": "",
+            "LEDGER_TRUST_LOCAL_IDENTITY": trusted,
+        }
+        with (
+            mock.patch.dict("os.environ", env, clear=False),
+            mock.patch(
+                "traust_ledger.cli.identity.config.config_dir",
+                return_value=local_config_dir,
+            ),
+        ):
+            client = LedgerClient(
+                token, data_dir=str(data_dir), signing_config=SigningConfig(method="none")
+            )
+
+            def countersign() -> None:
+                client.countersign(
+                    "L",
+                    "F-1",
+                    rationale="Reviewed the refutation; the guard is real and covers it.",
+                    recorded_at="2026-07-01T12:00:00+00:00",
+                    decision="false_positive",
+                )
+
+            if accepted:
+                countersign()
+            else:
+                with pytest.raises(LedgerError):
+                    countersign()
+
+        events = FileBackend(data_dir=data_dir).load(path)["events"]
+        assert len(events) == (1 if accepted else 0)
 
     def test_rejects_expired_local_token(self, local_config_dir: Path) -> None:
         """Expired token → LedgerError, not silent degradation."""

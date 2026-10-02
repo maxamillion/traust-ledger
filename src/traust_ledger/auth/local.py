@@ -31,6 +31,17 @@ _TOKEN_LIFETIME_SECONDS = 7 * 24 * 3600  # 7 days
 
 LOCAL_ISSUER = "local"
 
+# Opt-in for a solo/offline deployment with no identity provider. A local token
+# proves only that its holder can read this machine's key — anyone can mint one
+# for any address — so by default it is NOT identity-verified and cannot satisfy
+# the verified-human gates (false-positive verdicts, two-person, restatements).
+TRUST_LOCAL_IDENTITY_ENV = "LEDGER_TRUST_LOCAL_IDENTITY"
+
+
+def local_identity_trusted() -> bool:
+    """True when the deployment opted in to treating local tokens as verified."""
+    return os.environ.get(TRUST_LOCAL_IDENTITY_ENV, "").strip() == "1"
+
 
 def ensure_local_keypair(config_dir: Path) -> ec.EllipticCurvePrivateKey:
     """Return the local signing key, generating one if it doesn't exist.

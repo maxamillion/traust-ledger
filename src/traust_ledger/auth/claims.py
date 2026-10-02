@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from traust_contracts.v1.models.layer import LayerActor
 
-from traust_ledger.auth.local import LOCAL_ISSUER
+from traust_ledger.auth.local import LOCAL_ISSUER, local_identity_trusted
 from traust_ledger.constants import ACTOR_KIND_HUMAN, ACTOR_KIND_MACHINE
 
 
@@ -56,7 +56,9 @@ def claims_to_actor(
     return LayerActor(
         kind=kind,
         identity=identity,
-        identity_verified=True,
+        # A local token is self-asserted: its signature proves possession of
+        # this machine's key, not who the holder is.
+        identity_verified=local_identity_trusted() if is_local else True,
         identity_provider="local" if is_local else "oidc",
         identity_issuer=issuer,
         identity_subject=str(claims.get("sub") or ""),
