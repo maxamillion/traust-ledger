@@ -30,7 +30,12 @@ All notable changes to traust-ledger are documented here.
   restatements must either switch to `ledger auth login` (OIDC) or set
   `LEDGER_TRUST_LOCAL_IDENTITY=1`. Events already in a ledger keep whatever
   `identity_verified` they were stamped with; replay does not re-interpret
-  them.
+  them. Pre-0.9.0 local events stay counted as verified because that was the
+  rule when they were written. After upgrading, a `local` +
+  `identity_verified=true` event means either it predates 0.9.0 or it was
+  written with the opt-in. To tell them apart, note each layer's last `seq`
+  at upgrade. Don't use `recorded_at`, because callers supply it and it can
+  be backdated.
 
 ## [0.8.5]
 
