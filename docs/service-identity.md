@@ -9,7 +9,8 @@ no "trust me" fallback, no static tokens. If you make security decisions about
 code, you must prove who you are.
 
 For solo developers: `ledger auth local --identity you@example.com` gets you
-running in seconds with no external provider. For teams and production, use
+running in seconds with no external provider (self-asserted — see
+[Local development](#local-development-and-testing) for what it can't sign). For teams and production, use
 `ledger auth login` with any OIDC provider (GitHub, Google, Keycloak, etc.).
 
 This is intentional — the ledger records security decisions (false positives,
@@ -115,9 +116,21 @@ ledger submit ...   # token auto-minted on first use
 ```
 
 Local actors are stamped with `identity_provider=local` and
-`identity_verified=true`. All domain gates pass. When you move to
-production, switch to `ledger auth login` (OIDC) — the upgrade changes
-only `identity_provider`; existing ledger events retain their provenance.
+`identity_verified=false`. A local token is self-asserted: its signature proves
+the holder can read this machine's key, not who they are, and anyone can mint
+one for any address. Writes that need only an identity pass (submit,
+`keep_open`/`confirmed` countersigns, severity). Writes that need a *verified*
+human are refused: false-positive verdicts, the second signature the two-person
+rule counts, and restatements.
+
+A solo or offline deployment with no identity provider can opt in with
+`LEDGER_TRUST_LOCAL_IDENTITY=1`, which stamps local actors
+`identity_verified=true` so every gate passes. Only do this where one person
+holds the machine and the ledger. `identity_provider=local` is still recorded,
+so those events stay distinguishable from OIDC ones.
+
+When you move to production, switch to `ledger auth login` (OIDC); existing
+ledger events retain their provenance.
 
 **Note:** See [`auth.md`](auth.md) for how token resolution and verifier
 selection interact, including the env var precedence chain.
