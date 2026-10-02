@@ -2,6 +2,36 @@
 
 All notable changes to traust-ledger are documented here.
 
+## [0.9.0]
+
+### Security
+
+- **`LedgerClient` no longer stamps a caller-supplied actor.** `countersign`,
+  `restate` and `restate_many` took an `actor=` that replaced the
+  token-verified caller outright, so an in-process caller could record a
+  countersign or restatement as anyone, with any `identity_verified` /
+  `employee_status`. The token is now always verified and the verified actor
+  is what gets stamped; a passed `actor` must match its principal (kind,
+  identity, issuer, subject) or the write is refused. This matches the CLI and
+  REST paths, which never accepted an override.
+- **Local tokens are no longer identity-verified by default.** `ledger auth
+  local` (and `LEDGER_LOCAL_IDENTITY` auto-mint) let anyone mint a token for
+  any address, and every such actor was stamped `identity_verified=true`. That
+  satisfied the verified-human gates, so one person holding two local
+  identities could meet the two-person rule alone. Local actors are now stamped
+  `identity_verified=false`: false-positive verdicts and restatements from them
+  are refused, while `keep_open` / `confirmed` / severity countersigns and
+  submits still work. Solo and offline deployments can opt back in with
+  `LEDGER_TRUST_LOCAL_IDENTITY=1`.
+
+### Changed (breaking for local-auth operators)
+
+- A human using `ledger auth local` who records false-positive verdicts or
+  restatements must either switch to `ledger auth login` (OIDC) or set
+  `LEDGER_TRUST_LOCAL_IDENTITY=1`. Events already in a ledger keep whatever
+  `identity_verified` they were stamped with; replay does not re-interpret
+  them.
+
 ## [0.8.5]
 
 ### Changed
