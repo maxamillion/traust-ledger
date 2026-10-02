@@ -197,6 +197,15 @@ def _resolve_backend(
     return config, create_backend(bt, **backend_kwargs)
 
 
+def _principal(actor: LayerActor) -> tuple[str, str, str, str]:
+    return (
+        actor.kind or "",
+        (actor.identity or "").strip().lower(),
+        actor.identity_issuer or "",
+        actor.identity_subject or "",
+    )
+
+
 class LedgerClient:
     """In-process Python SDK for authenticated ledger operations.
 
@@ -477,8 +486,8 @@ class LedgerClient:
         """Record a human countersign/severity event through the gated handler.
 
         Runs the human-lane gates (two-person, verified-for-FP, rationale,
-        timestamp) and finalizes atomically. Falls back to the token-verified
-        caller when no actor is supplied.
+        timestamp) and finalizes atomically. The token-verified caller is the
+        actor stamped; an explicit *actor* must be that same caller.
         """
         from traust_ledger.handlers.event_handler import submit_event
         from traust_ledger.models import EventEnvelope
@@ -496,9 +505,7 @@ class LedgerClient:
             event["decision"] = decision
             kind = "countersign"
         envelope = EventEnvelope(kind=kind, event=event)
-        return self._invoke(
-            submit_event, envelope, actor or self._actor(), self._writer, self._config
-        )
+        return self._invoke(submit_event, envelope, self._caller(actor), self._writer, self._config)
 
     def restate(
         self,
@@ -525,7 +532,7 @@ class LedgerClient:
             layer_id,
             block,
             rationale,
-            actor or self._actor(),
+            self._caller(actor),
             recorded_at or datetime.now(UTC).isoformat(),
             self._writer,
             self._config,
@@ -548,7 +555,7 @@ class LedgerClient:
         return self._invoke(
             apply_restatement_batch,
             items,
-            actor or self._actor(),
+            self._caller(actor),
             self._writer,
             self._config,
         )
@@ -590,6 +597,24 @@ class LedgerClient:
             return apply_directory(actor, self._directory)
         except DirectoryRefusedError as exc:
             raise LedgerError(exc.detail) from exc
+
+    def _caller(self, actor: LayerActor | None) -> LayerActor:
+        """The token-verified caller, which an explicit *actor* must match.
+
+        An *actor* argument is accepted so callers holding the verified actor
+        can pass it through, but it never replaces verification: its principal
+        (kind, identity, issuer, subject) must be the token's, and the verified
+        actor is what gets stamped — so a caller cannot assert another identity
+        or its own ``identity_verified`` / ``employee_status``.
+        """
+        verified = self._actor()
+        if actor is not None and _principal(actor) != _principal(verified):
+            raise LedgerError(
+                f"actor {actor.identity!r} does not match the token-verified caller "
+                f"{verified.identity!r} — an event is recorded as the caller who "
+                "authenticated, never as an identity passed in"
+            )
+        return verified
 
     def _invoke(self, fn: Callable[..., T], *args: object, **kwargs: object) -> dict[str, Any]:
         from traust_ledger.errors import ServiceError
